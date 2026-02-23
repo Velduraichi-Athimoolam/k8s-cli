@@ -6,9 +6,9 @@ Usage: python k8s_cli.py [command] [options]
 
 import argparse
 import json
-import os
 import sys
 import subprocess
+import datetime
 from typing import Optional
 
 try:
@@ -24,21 +24,37 @@ try:
 except ImportError:
     HAS_TABULATE = False
 
+
 # ── Color helpers ────────────────────────────────────────────────────────────
 
 class Colors:
-    RED    = "\033[91m"
-    GREEN  = "\033[92m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
     YELLOW = "\033[93m"
-    BLUE   = "\033[94m"
-    BOLD   = "\033[1m"
-    RESET  = "\033[0m"
+    BLUE = "\033[94m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
 
-def ok(msg):    print(f"{Colors.GREEN}✔ {msg}{Colors.RESET}")
-def err(msg):   print(f"{Colors.RED}✖ {msg}{Colors.RESET}", file=sys.stderr)
-def warn(msg):  print(f"{Colors.YELLOW}⚠ {msg}{Colors.RESET}")
-def info(msg):  print(f"{Colors.BLUE}ℹ {msg}{Colors.RESET}")
-def header(msg):print(f"{Colors.BOLD}{msg}{Colors.RESET}")
+
+def ok(msg):
+    print(f"{Colors.GREEN}✔ {msg}{Colors.RESET}")
+
+
+def err(msg):
+    print(f"{Colors.RED}✖ {msg}{Colors.RESET}", file=sys.stderr)
+
+
+def warn(msg):
+    print(f"{Colors.YELLOW}⚠ {msg}{Colors.RESET}")
+
+
+def info(msg):
+    print(f"{Colors.BLUE}ℹ {msg}{Colors.RESET}")
+
+
+def header(msg):
+    print(f"{Colors.BOLD}{msg}{Colors.RESET}")
+
 
 # ── Kubernetes client setup ──────────────────────────────────────────────────
 
@@ -58,21 +74,27 @@ def load_kube_config(context: Optional[str] = None, in_cluster: bool = False):
         err(f"Failed to load config: {e}")
         sys.exit(1)
 
+
 # ── Table rendering ──────────────────────────────────────────────────────────
+
+def fmt_row(row, col_w):
+    return "  ".join(str(row[i]).ljust(col_w[i]) for i in range(len(row)))
+
 
 def print_table(headers, rows, fmt="grid"):
     if HAS_TABULATE:
         print(tabulate(rows, headers=headers, tablefmt=fmt))
     else:
-        # Fallback: fixed-width manual table
-        col_w = [max(len(str(headers[i])), max((len(str(r[i])) for r in rows), default=0))
-                 for i in range(len(headers))]
+        col_w = [
+            max(len(str(headers[i])), max((len(str(r[i])) for r in rows), default=0))
+            for i in range(len(headers))
+        ]
         sep = "  ".join("-" * w for w in col_w)
-        fmt_row = lambda r: "  ".join(str(r[i]).ljust(col_w[i]) for i in range(len(r)))
-        print(fmt_row(headers))
+        print(fmt_row(headers, col_w))
         print(sep)
         for row in rows:
-            print(fmt_row(row))
+            print(fmt_row(row, col_w))
+
 
 # ── Namespace commands ───────────────────────────────────────────────────────
 
@@ -86,6 +108,7 @@ def cmd_get_namespaces(args):
         print_table(["NAME", "STATUS"], rows)
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Pod commands ─────────────────────────────────────────────────────────────
 
@@ -112,6 +135,7 @@ def cmd_get_pods(args):
     except ApiException as e:
         err(f"API error: {e.reason}")
 
+
 def cmd_describe_pod(args):
     load_kube_config(args.context, args.in_cluster)
     v1 = client.CoreV1Api()
@@ -124,11 +148,11 @@ def cmd_describe_pod(args):
         print(f"  Phase     : {pod.status.phase}")
         print(f"  IP        : {pod.status.pod_ip}")
         print(f"  Created   : {pod.metadata.creation_timestamp}")
-        print(f"\n  {'Containers':}")
+        print("\n  Containers:")
         for c in pod.spec.containers:
             print(f"    - {c.name}  image={c.image}")
         if pod.status.container_statuses:
-            print(f"\n  {'Container Status':}")
+            print("\n  Container Status:")
             for cs in pod.status.container_statuses:
                 state = list(cs.state.to_dict().keys())[0] if cs.state else "unknown"
                 print(f"    - {cs.name}  ready={cs.ready}  restarts={cs.restart_count}  state={state}")
@@ -136,6 +160,7 @@ def cmd_describe_pod(args):
             print(json.dumps(pod.to_dict(), indent=2, default=str))
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 def cmd_pod_logs(args):
     load_kube_config(args.context, args.in_cluster)
@@ -153,6 +178,7 @@ def cmd_pod_logs(args):
     except ApiException as e:
         err(f"API error: {e.reason}")
 
+
 def cmd_delete_pod(args):
     load_kube_config(args.context, args.in_cluster)
     v1 = client.CoreV1Api()
@@ -162,6 +188,7 @@ def cmd_delete_pod(args):
         ok(f"Pod '{args.name}' deleted from namespace '{ns}'")
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Deployment commands ──────────────────────────────────────────────────────
 
@@ -186,6 +213,7 @@ def cmd_get_deployments(args):
     except ApiException as e:
         err(f"API error: {e.reason}")
 
+
 def cmd_scale_deployment(args):
     load_kube_config(args.context, args.in_cluster)
     apps = client.AppsV1Api()
@@ -198,21 +226,23 @@ def cmd_scale_deployment(args):
     except ApiException as e:
         err(f"API error: {e.reason}")
 
+
 def cmd_rollout_restart(args):
     load_kube_config(args.context, args.in_cluster)
     apps = client.AppsV1Api()
     ns = args.namespace or "default"
-    import datetime
     try:
         dep = apps.read_namespaced_deployment(name=args.name, namespace=ns)
         if not dep.spec.template.metadata.annotations:
             dep.spec.template.metadata.annotations = {}
-        dep.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] = \
+        dep.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] = (
             datetime.datetime.utcnow().isoformat() + "Z"
+        )
         apps.patch_namespaced_deployment(name=args.name, namespace=ns, body=dep)
         ok(f"Rollout restart triggered for deployment '{args.name}'")
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Service commands ─────────────────────────────────────────────────────────
 
@@ -234,6 +264,7 @@ def cmd_get_services(args):
     except ApiException as e:
         err(f"API error: {e.reason}")
 
+
 # ── ConfigMap commands ───────────────────────────────────────────────────────
 
 def cmd_get_configmaps(args):
@@ -242,12 +273,15 @@ def cmd_get_configmaps(args):
     ns = args.namespace or "default"
     try:
         cms = v1.list_namespaced_config_map(namespace=ns)
-        rows = [(cm.metadata.name, len(cm.data or {}), cm.metadata.creation_timestamp)
-                for cm in cms.items]
+        rows = [
+            (cm.metadata.name, len(cm.data or {}), cm.metadata.creation_timestamp)
+            for cm in cms.items
+        ]
         header(f"ConfigMaps in namespace: {ns}")
         print_table(["NAME", "DATA", "CREATED"], rows)
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Node commands ─────────────────────────────────────────────────────────────
 
@@ -260,13 +294,18 @@ def cmd_get_nodes(args):
         for n in nodes.items:
             conds = {c.type: c.status for c in (n.status.conditions or [])}
             ready = "True" if conds.get("Ready") == "True" else "False"
-            roles = [l.split("/")[-1] for l in n.metadata.labels if "node-role.kubernetes.io/" in l]
+            roles = [
+                label.split("/")[-1]
+                for label in n.metadata.labels
+                if "node-role.kubernetes.io/" in label
+            ]
             ver = n.status.node_info.kubelet_version
             rows.append((n.metadata.name, ready, ",".join(roles) or "<none>", ver))
         header("Nodes")
         print_table(["NAME", "READY", "ROLES", "VERSION"], rows)
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Cluster info ─────────────────────────────────────────────────────────────
 
@@ -275,25 +314,26 @@ def cmd_cluster_info(args):
     v1 = client.CoreV1Api()
     apps = client.AppsV1Api()
     try:
-        nss   = len(v1.list_namespace().items)
+        nss = len(v1.list_namespace().items)
         nodes = len(v1.list_node().items)
         ns = args.namespace or "default"
-        pods  = len(v1.list_namespaced_pod(namespace=ns).items)
-        deps  = len(apps.list_namespaced_deployment(namespace=ns).items)
-        svcs  = len(v1.list_namespaced_service(namespace=ns).items)
+        pods = len(v1.list_namespaced_pod(namespace=ns).items)
+        deps = len(apps.list_namespaced_deployment(namespace=ns).items)
+        svcs = len(v1.list_namespaced_service(namespace=ns).items)
         header("Cluster Summary")
         print_table(
             ["Resource", "Count"],
             [
-                ("Namespaces",  nss),
-                ("Nodes",       nodes),
-                (f"Pods ({ns})",        pods),
+                ("Namespaces", nss),
+                ("Nodes", nodes),
+                (f"Pods ({ns})", pods),
                 (f"Deployments ({ns})", deps),
-                (f"Services ({ns})",    svcs),
+                (f"Services ({ns})", svcs),
             ]
         )
     except ApiException as e:
         err(f"API error: {e.reason}")
+
 
 # ── Context commands ──────────────────────────────────────────────────────────
 
@@ -307,13 +347,14 @@ def cmd_get_contexts(args):
         for ctx in contexts:
             name = ctx["name"]
             cluster = ctx["context"].get("cluster", "")
-            user    = ctx["context"].get("user", "")
+            user = ctx["context"].get("user", "")
             current = "✔" if ctx["name"] == active["name"] else ""
             rows.append((current, name, cluster, user))
         header("Contexts")
         print_table(["CURRENT", "NAME", "CLUSTER", "USER"], rows)
     except Exception as e:
         err(f"Error: {e}")
+
 
 def cmd_use_context(args):
     if not HAS_K8S:
@@ -324,6 +365,7 @@ def cmd_use_context(args):
         ok(f"Switched to context '{args.name}'")
     except Exception as e:
         err(f"Error: {e}")
+
 
 # ── Exec / Port-forward (wraps kubectl) ──────────────────────────────────────
 
@@ -336,6 +378,7 @@ def cmd_exec(args):
     info(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd)
 
+
 def cmd_port_forward(args):
     ns = args.namespace or "default"
     cmd = ["kubectl", "port-forward", args.name, args.ports, "-n", ns]
@@ -345,6 +388,7 @@ def cmd_port_forward(args):
     except KeyboardInterrupt:
         ok("Port-forward stopped.")
 
+
 # ── Apply / Delete manifest ───────────────────────────────────────────────────
 
 def cmd_apply(args):
@@ -352,12 +396,14 @@ def cmd_apply(args):
     info(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd)
 
+
 def cmd_delete_resource(args):
     cmd = ["kubectl", "delete", "-f", args.file]
     if args.force:
         cmd.append("--force")
     info(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd)
+
 
 # ── Argument parser ───────────────────────────────────────────────────────────
 
@@ -384,8 +430,7 @@ Examples:
         """
     )
 
-    # Global flags
-    parser.add_argument("--context",    default=None,  help="Kubeconfig context to use")
+    parser.add_argument("--context", default=None, help="Kubeconfig context to use")
     parser.add_argument("--in-cluster", action="store_true", help="Use in-cluster config")
     parser.add_argument("-n", "--namespace", default=None, help="Kubernetes namespace")
     parser.add_argument("-o", "--output", default="table", choices=["table", "json"], help="Output format")
@@ -395,14 +440,13 @@ Examples:
     # ── get ──
     get_p = sub.add_parser("get", help="Get resources")
     get_sub = get_p.add_subparsers(dest="resource", metavar="RESOURCE")
-
-    get_sub.add_parser("namespaces",  help="List namespaces")
-    get_sub.add_parser("pods",        help="List pods")
+    get_sub.add_parser("namespaces", help="List namespaces")
+    get_sub.add_parser("pods", help="List pods")
     get_sub.add_parser("deployments", help="List deployments")
-    get_sub.add_parser("services",    help="List services")
-    get_sub.add_parser("configmaps",  help="List configmaps")
-    get_sub.add_parser("nodes",       help="List nodes")
-    get_sub.add_parser("contexts",    help="List kubeconfig contexts")
+    get_sub.add_parser("services", help="List services")
+    get_sub.add_parser("configmaps", help="List configmaps")
+    get_sub.add_parser("nodes", help="List nodes")
+    get_sub.add_parser("contexts", help="List kubeconfig contexts")
 
     # ── describe ──
     desc_p = sub.add_parser("describe", help="Describe a resource")
@@ -463,6 +507,7 @@ Examples:
 
     return parser
 
+
 # ── Main dispatch ─────────────────────────────────────────────────────────────
 
 def main():
@@ -473,41 +518,58 @@ def main():
         parser.print_help()
         return
 
-    # get <resource>
     if args.command == "get":
-        if args.resource == "namespaces":  cmd_get_namespaces(args)
-        elif args.resource == "pods":      cmd_get_pods(args)
-        elif args.resource == "deployments": cmd_get_deployments(args)
-        elif args.resource == "services":  cmd_get_services(args)
-        elif args.resource == "configmaps": cmd_get_configmaps(args)
-        elif args.resource == "nodes":     cmd_get_nodes(args)
-        elif args.resource == "contexts":  cmd_get_contexts(args)
+        if args.resource == "namespaces":
+            cmd_get_namespaces(args)
+        elif args.resource == "pods":
+            cmd_get_pods(args)
+        elif args.resource == "deployments":
+            cmd_get_deployments(args)
+        elif args.resource == "services":
+            cmd_get_services(args)
+        elif args.resource == "configmaps":
+            cmd_get_configmaps(args)
+        elif args.resource == "nodes":
+            cmd_get_nodes(args)
+        elif args.resource == "contexts":
+            cmd_get_contexts(args)
         else:
             err(f"Unknown resource '{args.resource}'")
             parser.print_help()
 
     elif args.command == "describe":
-        if args.resource == "pod":   cmd_describe_pod(args)
+        if args.resource == "pod":
+            cmd_describe_pod(args)
         else:
             err(f"Unknown resource '{args.resource}'")
 
-    elif args.command == "logs":       cmd_pod_logs(args)
-    elif args.command == "delete-pod": cmd_delete_pod(args)
+    elif args.command == "logs":
+        cmd_pod_logs(args)
+    elif args.command == "delete-pod":
+        cmd_delete_pod(args)
 
     elif args.command == "scale":
-        if args.resource == "deployment": cmd_scale_deployment(args)
+        if args.resource == "deployment":
+            cmd_scale_deployment(args)
         else:
             err(f"Unknown resource '{args.resource}'")
 
     elif args.command == "rollout":
-        if args.action == "restart": cmd_rollout_restart(args)
+        if args.action == "restart":
+            cmd_rollout_restart(args)
 
-    elif args.command == "cluster-info": cmd_cluster_info(args)
-    elif args.command == "use-context":  cmd_use_context(args)
-    elif args.command == "exec":         cmd_exec(args)
-    elif args.command == "port-forward": cmd_port_forward(args)
-    elif args.command == "apply":        cmd_apply(args)
-    elif args.command == "delete":       cmd_delete_resource(args)
+    elif args.command == "cluster-info":
+        cmd_cluster_info(args)
+    elif args.command == "use-context":
+        cmd_use_context(args)
+    elif args.command == "exec":
+        cmd_exec(args)
+    elif args.command == "port-forward":
+        cmd_port_forward(args)
+    elif args.command == "apply":
+        cmd_apply(args)
+    elif args.command == "delete":
+        cmd_delete_resource(args)
     else:
         err(f"Unknown command '{args.command}'")
         parser.print_help()
