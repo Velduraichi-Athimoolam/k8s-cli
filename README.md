@@ -1,4 +1,4 @@
-cat > README.md << 'EOF'
+
 # ☸️ k8s-cli
 
 A lightweight Python CLI for interacting with Kubernetes clusters — including Amazon EKS.
